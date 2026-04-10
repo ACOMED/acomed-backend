@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { sendResponse } = require('../utils/response');
 
 const toEpoch = (value) => {
   const parsed = new Date(value).getTime();
@@ -108,15 +109,11 @@ const syncAnswerRecord = async (client, answer) => {
   return 'ignored';
 };
 
-const syncData = async (req, res, next) => {
+const syncData = async (req, res) => {
   const { audits = [], answers = [] } = req.body;
 
   if (!Array.isArray(audits) || !Array.isArray(answers)) {
-    return res.status(400).json({
-      success: false,
-      data: null,
-      message: 'Payload must include audits and answers arrays.'
-    });
+    return sendResponse(res, 400, false, null, 'Payload must include audits and answers arrays.');
   }
 
   const client = await db.pool.connect();
@@ -141,14 +138,10 @@ const syncData = async (req, res, next) => {
 
     await client.query('COMMIT');
 
-    return res.status(200).json({
-      success: true,
-      data: summary,
-      message: 'Sync completed.'
-    });
+    return sendResponse(res, 200, true, summary, 'Sync completed.');
   } catch (error) {
     await client.query('ROLLBACK');
-    return next(error);
+    throw error;
   } finally {
     client.release();
   }
