@@ -11,7 +11,7 @@ const login = async (req, res) => {
   }
 
   const result = await db.query(
-    `SELECT id, full_name, email, password_hash, role, created_at, updated_at
+    `SELECT id, tenant_id, full_name, email, password_hash, role, created_at, updated_at
      FROM users
      WHERE email = $1
      LIMIT 1`,
@@ -31,9 +31,9 @@ const login = async (req, res) => {
 
   const token = jwt.sign(
     {
-      sub: user.id,
-      email: user.email,
-      role: user.role
+      id: user.id,
+      role: user.role,
+      tenant_id: user.tenant_id
     },
     process.env.JWT_SECRET,
     {
@@ -49,6 +49,7 @@ const login = async (req, res) => {
       token,
       user: {
         id: user.id,
+        tenant_id: user.tenant_id,
         full_name: user.full_name,
         email: user.email,
         role: user.role,
