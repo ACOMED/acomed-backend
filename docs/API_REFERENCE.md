@@ -194,3 +194,61 @@ Returns template metadata, sections, and a `questions` array describing each UI 
 - Frontend must request template at audit start or cache refresh.
 - UI composition must be based on `questions` and their `answer_type`.
 - Conditional visibility must be computed from `parent_question_id` + `prerequisite_condition`.
+
+## Test Accounts (QA / Integration)
+
+Use these accounts for integration tests and dashboard/mobile validation.
+
+- Admin
+  - email: `test.admin@acomed.tech`
+  - password: `AcomedTest@123`
+  - role: `admin`
+- Inspector
+  - email: `test.inspector@acomed.tech`
+  - password: `InspectorTest@123`
+  - role: `inspector`
+
+These users are created by migration file:
+
+`database/migrations/02_seed_test_accounts.sql`
+
+## How to Use the API (Quick Flow)
+
+### 1) Login
+
+```bash
+curl -X POST "https://api.acomed.tech/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test.admin@acomed.tech",
+    "password": "AcomedTest@123"
+  }'
+```
+
+Copy `data.token` from the response.
+
+### 2) Get Dynamic Template
+
+```bash
+curl -X GET "https://api.acomed.tech/api/templates/TPL-GMP-001" \
+  -H "Authorization: Bearer <JWT_TOKEN>"
+```
+
+### 3) Send Sync Payload
+
+```bash
+curl -X POST "https://api.acomed.tech/api/sync" \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audits": [],
+    "answers": [],
+    "capas": []
+  }'
+```
+
+### 4) Health Check
+
+```bash
+curl -X GET "https://api.acomed.tech/health"
+```
