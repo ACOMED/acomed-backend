@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
 const syncRoutes = require('./routes/syncRoutes');
+const templateRoutes = require('./routes/templateRoutes');
 const { sendResponse } = require('./utils/response');
 
 dotenv.config({ quiet: true });
@@ -13,6 +14,7 @@ app.use(express.json());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/templates', templateRoutes);
 
 app.get('/health', (req, res) => {
   return sendResponse(res, 200, true, { status: 'ok' }, 'Server is running.');
