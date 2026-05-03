@@ -9,8 +9,27 @@ dotenv.config({ quiet: true });
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
+const corsOrigin = process.env.CORS_ORIGIN || '*';
 
 app.use(express.json());
+
+app.use((req, res, next) => {
+  if (corsOrigin === '*') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  return next();
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/sync', syncRoutes);
