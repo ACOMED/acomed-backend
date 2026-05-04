@@ -22,25 +22,9 @@ const getAnalyticsOverview = async (req, res) => {
 
   const auditTotals = await db.query(
     `SELECT
-       COUNT(*)::int AS total,
-       SUM(CASE WHEN status = 'cloture' THEN 1 ELSE 0 END)::int AS closed,
-       AVG(compliance_score)::int AS avg_compliance
+       AVG(compliance_score)::int AS avg_compliance,
+       AVG(maturity_level)::int AS avg_maturity
      FROM audits
-     WHERE tenant_id = $1`,
-    [tenantId]
-  );
-
-  const capaCounts = await db.query(
-    `SELECT severity, status, COUNT(*)::int AS count
-     FROM capa
-     WHERE tenant_id = $1
-     GROUP BY severity, status`,
-    [tenantId]
-  );
-
-  const facilityTotals = await db.query(
-    `SELECT COUNT(*)::int AS total
-     FROM facilities
      WHERE tenant_id = $1`,
     [tenantId]
   );
@@ -53,7 +37,7 @@ const getAnalyticsOverview = async (req, res) => {
     [tenantId]
   );
 
-  const pendingCapas = await db.query(
+  const openCapas = await db.query(
     `SELECT COUNT(*)::int AS total
      FROM capa
      WHERE tenant_id = $1
@@ -61,57 +45,44 @@ const getAnalyticsOverview = async (req, res) => {
     [tenantId]
   );
 
-  const facilityInspected = await db.query(
-    `SELECT COUNT(DISTINCT facility_id)::int AS total
+  const trendRows = await db.query(
+    `SELECT to_char(date_trunc('month', COALESCE(date, scheduled_date)), 'Mon') AS month,
+            AVG(compliance_score)::int AS compliance,
+            AVG(maturity_level)::int AS maturity
      FROM audits
-     WHERE tenant_id = $1`,
+     WHERE tenant_id = $1
+       AND COALESCE(date, scheduled_date) >= (NOW() - INTERVAL '6 months')
+     GROUP BY date_trunc('month', COALESCE(date, scheduled_date))
+     ORDER BY date_trunc('month', COALESCE(date, scheduled_date))`,
     [tenantId]
   );
 
-  const normalizeCounts = (statuses) => {
-    return capaCounts.rows
-      .filter((row) => statuses.includes(row.status))
-      .reduce(
-        (acc, row) => {
-          const severityKey = row.severity ? row.severity.toLowerCase() : 'minor';
-          if (severityKey === 'critical') {
-            acc.Critical += row.count;
-          } else if (severityKey === 'major') {
-            acc.Major += row.count;
-          } else {
-            acc.Minor += row.count;
-          }
-          return acc;
-        },
-        { Critical: 0, Major: 0, Minor: 0 }
-      );
-  };
+  const auditTotal = auditTotals.rows[0] || { avg_compliance: 0, avg_maturity: 0 };
+  const complianceScore = Number(auditTotal.avg_compliance || 0);
+  const maturityScore = Number(auditTotal.avg_maturity || 0);
 
-  const auditTotal = auditTotals.rows[0] || { total: 0, closed: 0, avg_compliance: 0 };
+  const trendData = trendRows.rows.map((row) => ({
+    name: row.month,
+    compliance: Number(row.compliance || 0),
+    maturity: Number(row.maturity || 0)
+  }));
+
   const response = {
-    compliance_score: Number(auditTotal.avg_compliance || 0),
-    maturity_scores: {
-      Process: 0,
-      Documentation: 0,
-      Training: 0,
-      'Risk Mgmt': 0,
-      Audit: 0,
-      CAPA: 0
-    },
-    capa_counts: {
-      open: normalizeCounts(['todo', 'inProgress', 'review']),
-      closed: normalizeCounts(['closed'])
-    },
-    kpis: {
-      active_audits: Number(activeAudits.rows[0]?.total || 0),
-      pending_capas: Number(pendingCapas.rows[0]?.total || 0),
-      facilities_inspected: Number(facilityInspected.rows[0]?.total || 0),
-      total_facilities: Number(facilityTotals.rows[0]?.total || 0),
-      system_health: 'Good'
-    }
+    complianceScore,
+    maturityScore,
+    activeAudits: Number(activeAudits.rows[0]?.total || 0),
+    openCapas: Number(openCapas.rows[0]?.total || 0),
+    radarData: [
+      { subject: 'Safety', A: complianceScore, fullMark: 100 },
+      { subject: 'Hygiene', A: maturityScore, fullMark: 100 }
+    ],
+    trendData
   };
 
-  return sendResponse(res, 200, true, response, 'Analytics overview fetched successfully.');
+  return res.status(200).json({
+    success: true,
+    data: response
+  });
 };
 
 module.exports = {

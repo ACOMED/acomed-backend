@@ -39,6 +39,17 @@ const ensureUser = async (tenantId, userId) => {
   }
 };
 
+const notifyAdmins = async (tenantId, message) => {
+  await db.query(
+    `INSERT INTO notifications (tenant_id, user_id, message)
+     SELECT $1, u.id, $2
+     FROM users u
+     WHERE u.tenant_id = $1
+       AND u.role = 'admin'`,
+    [tenantId, message]
+  );
+};
+
 const normalizeCapaStatus = (status) => {
   if (!status) {
     return 'todo';
@@ -79,13 +90,19 @@ const createCapa = async (req, res) => {
     return sendResponse(res, 400, false, null, 'audit_id, title, and severity are required.');
   }
 
+  const normalizedSeverity = severity.toLowerCase();
+  const allowedSeverities = new Set(['critical', 'major', 'minor']);
+  if (!allowedSeverities.has(normalizedSeverity)) {
+    return sendResponse(res, 400, false, null, 'Invalid severity.');
+  }
+
   await ensureAudit(tenantId, audit_id);
 
   const result = await db.query(
     `INSERT INTO capa (audit_id, title, severity, status, due_date, tenant_id)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, title, severity, status`,
-    [audit_id, title, severity, 'todo', due_date || null, tenantId]
+    [audit_id, title, normalizedSeverity, 'todo', due_date || null, tenantId]
   );
 
   return sendResponse(res, 201, true, {
@@ -138,7 +155,26 @@ const updateCapaStatus = async (req, res) => {
     return sendResponse(res, 400, false, null, 'Invalid status.');
   }
 
-  return updateCapa({ ...req, body: { status } }, res);
+  const tenantId = ensureTenantId(req);
+  const { id } = req.params;
+  const currentResult = await db.query(
+    `SELECT status, title FROM capa WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
+  );
+
+  if (currentResult.rows.length === 0) {
+    return sendResponse(res, 404, false, null, 'CAPA ticket not found.');
+  }
+
+  const previousStatus = currentResult.rows[0].status;
+  const updated = await updateCapa({ ...req, body: { status } }, res);
+
+  if (previousStatus !== status && ['todo', 'inProgress', 'review'].includes(status)) {
+    const title = currentResult.rows[0].title || id;
+    await notifyAdmins(tenantId, `CAPA ${title} moved to ${status}.`);
+  }
+
+  return updated;
 };
 
 const assignCapa = async (req, res) => {

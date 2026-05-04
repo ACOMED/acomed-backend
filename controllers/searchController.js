@@ -31,18 +31,20 @@ const searchAll = async (req, res) => {
   const query = (req.query.q || '').trim();
 
   if (!query) {
-    return sendResponse(res, 200, true, [], 'Search completed.');
+    return res.status(200).json({ success: true, data: [] });
   }
 
   const likeQuery = `%${query}%`;
 
   const [audits, facilities, templates, capas] = await Promise.all([
     db.query(
-      `SELECT id, ref AS title
-       FROM audits
-       WHERE tenant_id = $1
-         AND ref ILIKE $2
-       ORDER BY updated_at DESC
+      `SELECT a.id,
+              COALESCE(f.name || ' Inspection', a.ref) AS title
+       FROM audits a
+       LEFT JOIN facilities f ON f.id = a.facility_id
+       WHERE a.tenant_id = $1
+         AND (a.ref ILIKE $2 OR f.name ILIKE $2)
+       ORDER BY a.updated_at DESC
        LIMIT 10`,
       [tenantId, likeQuery]
     ),
@@ -82,7 +84,10 @@ const searchAll = async (req, res) => {
     ...mapRows(capas.rows, 'CAPA', '/capa')
   ];
 
-  return sendResponse(res, 200, true, results, 'Search completed.');
+  return res.status(200).json({
+    success: true,
+    data: results
+  });
 };
 
 module.exports = {

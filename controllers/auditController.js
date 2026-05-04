@@ -18,6 +18,10 @@ const ensureTenantId = (req) => {
 };
 
 const ensureFacility = async (tenantId, facilityId) => {
+  const currentStatusResult = status
+    ? await db.query(`SELECT status, ref FROM audits WHERE id = $1 AND tenant_id = $2`, [id, tenantId])
+    : { rows: [] };
+
   const result = await db.query(
     `SELECT id FROM facilities WHERE id = $1 AND tenant_id = $2`,
     [facilityId, tenantId]
@@ -48,6 +52,17 @@ const ensureTemplate = async (tenantId, templateId) => {
   if (result.rows.length === 0) {
     throw createHttpError(404, 'Template not found.');
   }
+};
+
+const notifyAdmins = async (tenantId, message) => {
+  await db.query(
+    `INSERT INTO notifications (tenant_id, user_id, message)
+     SELECT $1, u.id, $2
+     FROM users u
+     WHERE u.tenant_id = $1
+       AND u.role = 'admin'`,
+    [tenantId, message]
+  );
 };
 
 const normalizeStatus = (status) => {
@@ -110,6 +125,17 @@ const getAuditById = async (req, res) => {
 
   if (result.rows.length === 0) {
     return sendResponse(res, 404, false, null, 'Audit not found.');
+  }
+
+  if (status) {
+    const currentStatus = currentStatusResult.rows[0]?.status;
+    const normalizedStatus = status.toLowerCase();
+    if (currentStatus && currentStatus !== normalizedStatus) {
+      if (normalizedStatus === 'soumis' || normalizedStatus === 'cloture') {
+        const auditRef = currentStatusResult.rows[0]?.ref || id;
+        await notifyAdmins(tenantId, `Audit ${auditRef} status changed to ${normalizedStatus}.`);
+      }
+    }
   }
 
   const audit = result.rows[0];
@@ -187,6 +213,15 @@ const updateAudit = async (req, res) => {
 
   if (result.rows.length === 0) {
     return sendResponse(res, 404, false, null, 'Audit not found.');
+  }
+
+  if (normalizedStatus === 'soumis' || normalizedStatus === 'cloture') {
+    const auditRefResult = await db.query(
+      `SELECT ref FROM audits WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    const auditRef = auditRefResult.rows[0]?.ref || id;
+    await notifyAdmins(tenantId, `Audit ${auditRef} status changed to ${normalizedStatus}.`);
   }
 
   return sendResponse(res, 200, true, {
