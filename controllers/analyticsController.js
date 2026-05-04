@@ -45,6 +45,14 @@ const getAnalyticsOverview = async (req, res) => {
     [tenantId]
   );
 
+  const capaCounts = await db.query(
+    `SELECT severity, status, COUNT(*)::int AS count
+     FROM capa
+     WHERE tenant_id = $1
+     GROUP BY severity, status`,
+    [tenantId]
+  );
+
   const trendRows = await db.query(
     `SELECT to_char(date_trunc('month', COALESCE(date, scheduled_date)), 'Mon') AS month,
             AVG(compliance_score)::int AS compliance,
@@ -67,6 +75,25 @@ const getAnalyticsOverview = async (req, res) => {
     maturity: Number(row.maturity || 0)
   }));
 
+  const normalizeCounts = (statuses) => {
+    return capaCounts.rows
+      .filter((row) => statuses.includes(row.status))
+      .reduce(
+        (acc, row) => {
+          const severityKey = row.severity ? row.severity.toLowerCase() : 'minor';
+          if (severityKey === 'critical') {
+            acc.Critical += row.count;
+          } else if (severityKey === 'major') {
+            acc.Major += row.count;
+          } else {
+            acc.Minor += row.count;
+          }
+          return acc;
+        },
+        { Critical: 0, Major: 0, Minor: 0 }
+      );
+  };
+
   const response = {
     complianceScore,
     maturityScore,
@@ -74,8 +101,15 @@ const getAnalyticsOverview = async (req, res) => {
     openCapas: Number(openCapas.rows[0]?.total || 0),
     radarData: [
       { subject: 'Safety', A: complianceScore, fullMark: 100 },
-      { subject: 'Hygiene', A: maturityScore, fullMark: 100 }
+      { subject: 'Hygiene', A: maturityScore, fullMark: 100 },
+      { subject: 'Documentation', A: maturityScore, fullMark: 100 },
+      { subject: 'Training', A: maturityScore, fullMark: 100 },
+      { subject: 'Process', A: complianceScore, fullMark: 100 }
     ],
+    capaCounts: {
+      open: normalizeCounts(['todo', 'inProgress', 'review']),
+      closed: normalizeCounts(['closed'])
+    },
     trendData
   };
 
