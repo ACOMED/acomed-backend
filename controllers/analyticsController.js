@@ -45,6 +45,21 @@ const getAnalyticsOverview = async (req, res) => {
     [tenantId]
   );
 
+  const facilitiesInspected = await db.query(
+    `SELECT COUNT(DISTINCT facility_id)::int AS total
+     FROM audits
+     WHERE tenant_id = $1
+       AND status = 'cloture'`,
+    [tenantId]
+  );
+
+  const totalFacilities = await db.query(
+    `SELECT COUNT(*)::int AS total
+     FROM facilities
+     WHERE tenant_id = $1`,
+    [tenantId]
+  );
+
   const capaCounts = await db.query(
     `SELECT severity, status, COUNT(*)::int AS count
      FROM capa
@@ -99,6 +114,8 @@ const getAnalyticsOverview = async (req, res) => {
     maturityScore,
     activeAudits: Number(activeAudits.rows[0]?.total || 0),
     openCapas: Number(openCapas.rows[0]?.total || 0),
+    facilitiesInspected: Number(facilitiesInspected.rows[0]?.total || 0),
+    totalFacilities: Number(totalFacilities.rows[0]?.total || 0),
     radarData: [
       { subject: 'Safety', A: complianceScore, fullMark: 100 },
       { subject: 'Hygiene', A: maturityScore, fullMark: 100 },
