@@ -41,24 +41,16 @@ const login = async (req, res) => {
     }
   );
 
-  return sendResponse(
-    res,
-    200,
-    true,
-    {
-      token,
-      user: {
-        id: user.id,
-        tenant_id: user.tenant_id,
-        full_name: user.full_name,
-        email: user.email,
-        role: user.role,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      }
-    },
-    'Login successful.'
-  );
+  return res.status(200).json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      name: user.full_name,
+      email: user.email,
+      role: user.role
+    }
+  });
 };
 
 module.exports = {

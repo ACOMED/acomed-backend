@@ -1,148 +1,132 @@
+const db = require('../config/db');
 const { sendResponse } = require('../utils/response');
 
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const ensureTenantId = (req) => {
+  const tenantId = req.user && req.user.tenant_id;
+
+  if (!tenantId) {
+    throw createHttpError(401, 'Unauthorized: tenant_id is required in token payload.');
+  }
+
+  return tenantId;
+};
+
+const normalizeTemplate = (row) => {
+  if (!row) {
+    return row;
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    schema: row.schema_json,
+    created_at: row.created_at
+  };
+};
+
+const listTemplates = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+
+  const result = await db.query(
+    `SELECT id, name, code, schema_json, created_at
+     FROM templates
+     WHERE tenant_id = $1
+     ORDER BY updated_at DESC`,
+    [tenantId]
+  );
+
+  const templates = result.rows.map(normalizeTemplate);
+  return sendResponse(res, 200, true, templates, 'Templates fetched successfully.');
+};
+
 const getTemplateById = async (req, res) => {
+  const tenantId = ensureTenantId(req);
   const { id } = req.params;
 
-  // This endpoint can later be switched to DB-backed templates.
-  const template = {
-    id,
-    code: 'GMP-WAREHOUSE-001',
-    name: 'Warehouse GMP Compliance Audit',
-    version: 3,
-    status: 'ACTIVE',
-    metadata: {
-      domain: 'quality',
-      industry: 'pharma',
-      language: 'en',
-      timezone: 'UTC',
-      created_by: 'system',
-      tags: ['gmp', 'warehouse', 'cold-chain']
-    },
-    scoring: {
-      enabled: true,
-      max_score: 100,
-      pass_threshold: 85
-    },
-    sections: [
-      {
-        id: 'SEC-GEN',
-        title: 'General Information',
-        order: 1
-      },
-      {
-        id: 'SEC-TEMP',
-        title: 'Temperature Control',
-        order: 2
-      },
-      {
-        id: 'SEC-HOUSE',
-        title: 'Housekeeping',
-        order: 3
-      }
-    ],
-    questions: [
-      {
-        id: 'Q-001',
-        section_id: 'SEC-GEN',
-        order: 1,
-        question_text: 'Inspector full name',
-        answer_type: 'TEXT',
-        required: true,
-        parent_question_id: null,
-        prerequisite_condition: null,
-        validation: {
-          min_length: 2,
-          max_length: 120
-        }
-      },
-      {
-        id: 'Q-002',
-        section_id: 'SEC-GEN',
-        order: 2,
-        question_text: 'Date of inspection',
-        answer_type: 'DATE',
-        required: true,
-        parent_question_id: null,
-        prerequisite_condition: null
-      },
-      {
-        id: 'Q-003',
-        section_id: 'SEC-TEMP',
-        order: 3,
-        question_text: 'Is there a cold room on site?',
-        answer_type: 'BOOLEAN',
-        required: true,
-        parent_question_id: null,
-        prerequisite_condition: null
-      },
-      {
-        id: 'Q-004',
-        section_id: 'SEC-TEMP',
-        order: 4,
-        question_text: 'Cold room temperature (in Celsius)',
-        answer_type: 'NUMBER',
-        required: true,
-        parent_question_id: 'Q-003',
-        prerequisite_condition: {
-          operator: 'EQUALS',
-          value: true
-        },
-        validation: {
-          min: -30,
-          max: 12
-        }
-      },
-      {
-        id: 'Q-005',
-        section_id: 'SEC-TEMP',
-        order: 5,
-        question_text: 'Attach a photo of the thermometer display',
-        answer_type: 'PHOTO',
-        required: false,
-        parent_question_id: 'Q-003',
-        prerequisite_condition: {
-          operator: 'EQUALS',
-          value: true
-        },
-        media: {
-          min_photos: 1,
-          max_photos: 3
-        }
-      },
-      {
-        id: 'Q-006',
-        section_id: 'SEC-HOUSE',
-        order: 6,
-        question_text: 'Are housekeeping standards compliant?',
-        answer_type: 'BOOLEAN',
-        required: true,
-        parent_question_id: null,
-        prerequisite_condition: null
-      },
-      {
-        id: 'Q-007',
-        section_id: 'SEC-HOUSE',
-        order: 7,
-        question_text: 'Describe the non-conformity observed',
-        answer_type: 'TEXT',
-        required: true,
-        parent_question_id: 'Q-006',
-        prerequisite_condition: {
-          operator: 'EQUALS',
-          value: false
-        },
-        validation: {
-          min_length: 10,
-          max_length: 1000
-        }
-      }
-    ],
-    updated_at: '2026-04-22T00:00:00.000Z'
-  };
+  const result = await db.query(
+    `SELECT id, name, code, schema_json, created_at
+     FROM templates
+     WHERE id = $1 AND tenant_id = $2
+     LIMIT 1`,
+    [id, tenantId]
+  );
 
-  return sendResponse(res, 200, true, template, 'Template fetched successfully.');
+  if (result.rows.length === 0) {
+    return sendResponse(res, 404, false, null, 'Template not found.');
+  }
+
+  return sendResponse(res, 200, true, normalizeTemplate(result.rows[0]), 'Template fetched successfully.');
+};
+
+const createTemplate = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+  const { name, code, schema } = req.body || {};
+
+  if (!name || !code || !schema) {
+    return sendResponse(res, 400, false, null, 'name, code, and schema are required.');
+  }
+
+  const result = await db.query(
+    `INSERT INTO templates (tenant_id, name, code, schema_json)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, name, code, schema_json, created_at`,
+    [tenantId, name, code, schema]
+  );
+
+  return sendResponse(res, 201, true, normalizeTemplate(result.rows[0]), 'Template created successfully.');
+};
+
+const updateTemplate = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+  const { id } = req.params;
+  const { name, code, schema } = req.body || {};
+
+  const result = await db.query(
+    `UPDATE templates
+     SET name = COALESCE($3, name),
+       code = COALESCE($4, code),
+       schema_json = COALESCE($5, schema_json)
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING id, name, code, schema_json, created_at`,
+    [id, tenantId, name || null, code || null, schema || null]
+  );
+
+  if (result.rows.length === 0) {
+    return sendResponse(res, 404, false, null, 'Template not found.');
+  }
+
+  return sendResponse(res, 200, true, normalizeTemplate(result.rows[0]), 'Template updated successfully.');
+};
+
+const deleteTemplate = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+  const { id } = req.params;
+
+  const result = await db.query(
+    `DELETE FROM templates
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING id`,
+    [id, tenantId]
+  );
+
+  if (result.rows.length === 0) {
+    return sendResponse(res, 404, false, null, 'Template not found.');
+  }
+
+  return sendResponse(res, 200, true, { id }, 'Template deleted successfully.');
 };
 
 module.exports = {
-  getTemplateById
+  listTemplates,
+  getTemplateById,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate
 };

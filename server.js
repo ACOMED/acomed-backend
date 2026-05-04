@@ -3,21 +3,28 @@ const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
 const syncRoutes = require('./routes/syncRoutes');
 const templateRoutes = require('./routes/templateRoutes');
+const tenantRoutes = require('./routes/tenantRoutes');
+const auditRoutes = require('./routes/auditRoutes');
+const capaRoutes = require('./routes/capaRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 const { sendResponse } = require('./utils/response');
 
 dotenv.config({ quiet: true });
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
-const corsOrigin = process.env.CORS_ORIGIN || '*';
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 app.use(express.json());
 
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = corsOrigin.split(',').map((value) => value.trim());
+
   if (corsOrigin === '*') {
     res.setHeader('Access-Control-Allow-Origin', '*');
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+  } else if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
 
@@ -34,6 +41,10 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/templates', templateRoutes);
+app.use('/api/tenants', tenantRoutes);
+app.use('/api/audits', auditRoutes);
+app.use('/api/capas', capaRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 app.get('/health', (req, res) => {
   return sendResponse(res, 200, true, { status: 'ok' }, 'Server is running.');
