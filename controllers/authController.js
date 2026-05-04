@@ -53,6 +53,49 @@ const login = async (req, res) => {
   });
 };
 
+const updateProfile = async (req, res) => {
+  const userId = req.user && req.user.id;
+  const tenantId = req.user && req.user.tenant_id;
+  const { name, email, password } = req.body || {};
+
+  if (!userId || !tenantId) {
+    return sendResponse(res, 401, false, null, 'Unauthorized: token is required.');
+  }
+
+  if (!name || !email) {
+    return sendResponse(res, 400, false, null, 'name and email are required.');
+  }
+
+  let passwordHash = null;
+  if (password && password.trim()) {
+    passwordHash = await bcrypt.hash(password, 10);
+  }
+
+  const result = await db.query(
+    `UPDATE users
+     SET full_name = $3,
+         email = $4,
+         password_hash = COALESCE($5, password_hash)
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING id, full_name, email, role`,
+    [userId, tenantId, name, email, passwordHash]
+  );
+
+  if (result.rows.length === 0) {
+    return sendResponse(res, 404, false, null, 'User not found.');
+  }
+
+  const updatedUser = result.rows[0];
+
+  return sendResponse(res, 200, true, {
+    id: updatedUser.id,
+    name: updatedUser.full_name,
+    email: updatedUser.email,
+    role: updatedUser.role
+  }, 'Profile updated successfully.');
+};
+
 module.exports = {
-  login
+  login,
+  updateProfile
 };

@@ -1,11 +1,10 @@
 const express = require('express');
-const { login, updateProfile } = require('../controllers/authController');
 const asyncHandler = require('../middlewares/asyncHandler');
 const authMiddleware = require('../middlewares/authMiddleware');
+const { getKnowledgeBaseArticles } = require('../controllers/knowledgeBaseController');
 
 const router = express.Router();
 
-router.post('/login', asyncHandler(login));
-router.put('/profile', authMiddleware, asyncHandler(updateProfile));
+router.get('/articles', authMiddleware, asyncHandler(getKnowledgeBaseArticles));
 
 module.exports = router;

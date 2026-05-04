@@ -7,6 +7,7 @@ const tenantRoutes = require('./routes/tenantRoutes');
 const auditRoutes = require('./routes/auditRoutes');
 const capaRoutes = require('./routes/capaRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const knowledgeBaseRoutes = require('./routes/knowledgeBaseRoutes');
 const { sendResponse } = require('./utils/response');
 
 dotenv.config({ quiet: true });
@@ -45,6 +46,7 @@ app.use('/api/tenants', tenantRoutes);
 app.use('/api/audits', auditRoutes);
 app.use('/api/capas', capaRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/knowledge-base', knowledgeBaseRoutes);
 
 app.get('/health', (req, res) => {
   return sendResponse(res, 200, true, { status: 'ok' }, 'Server is running.');
