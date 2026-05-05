@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS audits (
 CREATE TABLE IF NOT EXISTS answers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     audit_id UUID NOT NULL REFERENCES audits(id) ON DELETE CASCADE,
-    question_id UUID NOT NULL,
+    question_id TEXT NOT NULL,
     response_value JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

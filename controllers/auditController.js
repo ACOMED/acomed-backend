@@ -132,7 +132,7 @@ const getAuditById = async (req, res) => {
   const { id } = req.params;
 
   const auditResult = await db.query(
-    `SELECT a.id, a.ref, a.status, a.compliance_score, a.maturity_level,
+    `SELECT a.id, a.ref, a.status, a.compliance_score, a.maturity_level, a.template_id,
             f.name AS facility_name,
             u.full_name AS inspector_name
      FROM audits a
@@ -148,20 +148,39 @@ const getAuditById = async (req, res) => {
   }
 
   const responsesResult = await db.query(
-    `SELECT ans.id, ans.question_id, ans.response_value, q.question_text
+    `SELECT ans.id, ans.question_id, ans.response_value
      FROM answers ans
-     LEFT JOIN questions q ON q.id = ans.question_id
      WHERE ans.audit_id = $1
      ORDER BY ans.created_at ASC`,
     [id]
   );
+
+  let questionMap = new Map();
+  if (auditResult.rows[0].template_id) {
+    const templateResult = await db.query(
+      `SELECT schema_json
+       FROM templates
+       WHERE id = $1 AND tenant_id = $2
+       LIMIT 1`,
+      [auditResult.rows[0].template_id, tenantId]
+    );
+
+    const schema = templateResult.rows[0]?.schema_json;
+    if (schema && Array.isArray(schema.questions)) {
+      questionMap = new Map(
+        schema.questions
+          .filter((question) => question && question.question_id)
+          .map((question) => [question.question_id, question.label || question.question_text || null])
+      );
+    }
+  }
 
   const responses = responsesResult.rows.map((row) => {
     const parsed = parseResponseValue(row.response_value);
     return {
       id: row.id,
       question_id: row.question_id,
-      question_text: row.question_text,
+      question_text: questionMap.get(row.question_id) || null,
       answer_value: parsed.answer_value,
       evidence_url: parsed.evidence_url
     };
