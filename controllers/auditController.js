@@ -18,10 +18,6 @@ const ensureTenantId = (req) => {
 };
 
 const ensureFacility = async (tenantId, facilityId) => {
-  const currentStatusResult = status
-    ? await db.query(`SELECT status, ref FROM audits WHERE id = $1 AND tenant_id = $2`, [id, tenantId])
-    : { rows: [] };
-
   const result = await db.query(
     `SELECT id FROM facilities WHERE id = $1 AND tenant_id = $2`,
     [facilityId, tenantId]
@@ -79,6 +75,31 @@ const generateRef = () => {
   return `AUD-${year}-${random}`;
 };
 
+const parseResponseValue = (responseValue) => {
+  if (responseValue === null || responseValue === undefined) {
+    return { answer_value: null, evidence_url: null };
+  }
+
+  if (typeof responseValue === 'object') {
+    return {
+      answer_value:
+        responseValue.answer_value ??
+        responseValue.value ??
+        responseValue.answer ??
+        responseValue.text ??
+        responseValue,
+      evidence_url:
+        responseValue.evidence_url ??
+        responseValue.evidenceUrl ??
+        responseValue.photo_url ??
+        responseValue.url ??
+        null
+    };
+  }
+
+  return { answer_value: String(responseValue), evidence_url: null };
+};
+
 const listAudits = async (req, res) => {
   const tenantId = ensureTenantId(req);
 
@@ -110,11 +131,10 @@ const getAuditById = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { id } = req.params;
 
-  const result = await db.query(
-    `SELECT a.id, a.ref, a.status, COALESCE(a.date, a.scheduled_date) AS date,
-            a.answers,
-            f.name AS facility,
-            u.full_name AS inspector
+  const auditResult = await db.query(
+    `SELECT a.id, a.ref, a.status, a.compliance_score, a.maturity_level,
+            f.name AS facility_name,
+            u.full_name AS inspector_name
      FROM audits a
      LEFT JOIN facilities f ON f.id = a.facility_id
      LEFT JOIN users u ON u.id = a.inspector_id
@@ -123,30 +143,40 @@ const getAuditById = async (req, res) => {
     [id, tenantId]
   );
 
-  if (result.rows.length === 0) {
+  if (auditResult.rows.length === 0) {
     return sendResponse(res, 404, false, null, 'Audit not found.');
   }
 
-  if (status) {
-    const currentStatus = currentStatusResult.rows[0]?.status;
-    const normalizedStatus = status.toLowerCase();
-    if (currentStatus && currentStatus !== normalizedStatus) {
-      if (normalizedStatus === 'soumis' || normalizedStatus === 'cloture') {
-        const auditRef = currentStatusResult.rows[0]?.ref || id;
-        await notifyAdmins(tenantId, `Audit ${auditRef} status changed to ${normalizedStatus}.`);
-      }
-    }
-  }
+  const responsesResult = await db.query(
+    `SELECT ans.id, ans.question_id, ans.response_value, q.question_text
+     FROM answers ans
+     LEFT JOIN questions q ON q.id = ans.question_id
+     WHERE ans.audit_id = $1
+     ORDER BY ans.created_at ASC`,
+    [id]
+  );
 
-  const audit = result.rows[0];
+  const responses = responsesResult.rows.map((row) => {
+    const parsed = parseResponseValue(row.response_value);
+    return {
+      id: row.id,
+      question_id: row.question_id,
+      question_text: row.question_text,
+      answer_value: parsed.answer_value,
+      evidence_url: parsed.evidence_url
+    };
+  });
+
+  const audit = auditResult.rows[0];
   return sendResponse(res, 200, true, {
     id: audit.id,
-    ref: audit.ref,
-    facility: audit.facility,
-    inspector: audit.inspector,
-    date: audit.date,
+    code: audit.ref,
+    facility_name: audit.facility_name,
+    inspector_name: audit.inspector_name,
     status: normalizeStatus(audit.status),
-    answers: Array.isArray(audit.answers) ? audit.answers : audit.answers || []
+    compliance_score: audit.compliance_score,
+    maturity_score: audit.maturity_level,
+    responses
   }, 'Audit fetched successfully.');
 };
 
@@ -200,6 +230,10 @@ const updateAudit = async (req, res) => {
     await ensureFacility(tenantId, facility_id);
   }
 
+  const currentStatusResult = status
+    ? await db.query(`SELECT status, ref FROM audits WHERE id = $1 AND tenant_id = $2`, [id, tenantId])
+    : { rows: [] };
+
   const result = await db.query(
     `UPDATE audits
      SET inspector_id = COALESCE($3, inspector_id),
@@ -215,13 +249,15 @@ const updateAudit = async (req, res) => {
     return sendResponse(res, 404, false, null, 'Audit not found.');
   }
 
-  if (normalizedStatus === 'soumis' || normalizedStatus === 'cloture') {
-    const auditRefResult = await db.query(
-      `SELECT ref FROM audits WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId]
-    );
-    const auditRef = auditRefResult.rows[0]?.ref || id;
-    await notifyAdmins(tenantId, `Audit ${auditRef} status changed to ${normalizedStatus}.`);
+  if (status) {
+    const currentStatus = currentStatusResult.rows[0]?.status;
+    const normalizedStatus = status.toLowerCase();
+    if (currentStatus && currentStatus !== normalizedStatus) {
+      if (normalizedStatus === 'soumis' || normalizedStatus === 'cloture') {
+        const auditRef = currentStatusResult.rows[0]?.ref || id;
+        await notifyAdmins(tenantId, `Audit ${auditRef} status changed to ${normalizedStatus}.`);
+      }
+    }
   }
 
   return sendResponse(res, 200, true, {
@@ -247,6 +283,11 @@ const updateAuditStatus = async (req, res) => {
     return sendResponse(res, 400, false, null, 'Invalid status.');
   }
 
+  const auditRefResult = await db.query(
+    `SELECT ref FROM audits WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
+  );
+
   const result = await db.query(
     `UPDATE audits
      SET status = $3
@@ -257,6 +298,11 @@ const updateAuditStatus = async (req, res) => {
 
   if (result.rows.length === 0) {
     return sendResponse(res, 404, false, null, 'Audit not found.');
+  }
+
+  if (normalizedStatus === 'soumis' || normalizedStatus === 'cloture') {
+    const auditRef = auditRefResult.rows[0]?.ref || id;
+    await notifyAdmins(tenantId, `Audit ${auditRef} status changed to ${normalizedStatus}.`);
   }
 
   return sendResponse(res, 200, true, {

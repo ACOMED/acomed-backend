@@ -31,6 +31,21 @@ const normalizeTemplate = (row) => {
   };
 };
 
+const generateTemplateCode = (name) => {
+  const base = String(name || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  if (base) {
+    return base;
+  }
+
+  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `TPL-${random}`;
+};
+
 const listTemplates = async (req, res) => {
   const tenantId = ensureTenantId(req);
 
@@ -69,15 +84,17 @@ const createTemplate = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { name, code, schema } = req.body || {};
 
-  if (!name || !code || !schema) {
-    return sendResponse(res, 400, false, null, 'name, code, and schema are required.');
+  if (!name || !schema) {
+    return sendResponse(res, 400, false, null, 'name and schema are required.');
   }
+
+  const resolvedCode = code || generateTemplateCode(name);
 
   const result = await db.query(
     `INSERT INTO templates (tenant_id, name, code, schema_json)
      VALUES ($1, $2, $3, $4)
      RETURNING id, name, code, schema_json, created_at`,
-    [tenantId, name, code, schema]
+    [tenantId, name, resolvedCode, schema]
   );
 
   return sendResponse(res, 201, true, normalizeTemplate(result.rows[0]), 'Template created successfully.');
