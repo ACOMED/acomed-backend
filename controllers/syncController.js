@@ -45,6 +45,217 @@ const shouldUpsert = (mobileUpdatedAt, serverUpdatedAt) => {
   return mobileUpdatedAt > serverUpdatedAt;
 };
 
+const extractAnswerValue = (responseValue) => {
+  if (responseValue === null || responseValue === undefined) {
+    return null;
+  }
+
+  if (typeof responseValue === 'object') {
+    if (Object.prototype.hasOwnProperty.call(responseValue, 'answer_value')) {
+      return responseValue.answer_value;
+    }
+  }
+
+  return responseValue;
+};
+
+const normalizeAnswerText = (value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  return value.trim().toLowerCase();
+};
+
+const normalizeSeverity = (value) => {
+  const normalized = normalizeAnswerText(value);
+  if (!normalized) {
+    return 'major';
+  }
+
+  if (normalized === 'critical') {
+    return 'critical';
+  }
+
+  if (normalized === 'medium' || normalized === 'major') {
+    return 'major';
+  }
+
+  if (normalized === 'low' || normalized === 'minor') {
+    return 'minor';
+  }
+
+  return 'major';
+};
+
+const isAnswerYes = (value) => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = normalizeAnswerText(value);
+  return normalized === 'yes' || normalized === 'true';
+};
+
+const isAnswerNo = (value) => {
+  if (typeof value === 'boolean') {
+    return value === false;
+  }
+
+  const normalized = normalizeAnswerText(value);
+  return normalized === 'no' || normalized === 'false';
+};
+
+const shouldTriggerCapa = (question, responseValue) => {
+  if (!question?.trigger_capa) {
+    return false;
+  }
+
+  const normalizedAnswer = extractAnswerValue(responseValue);
+  return isAnswerNo(normalizedAnswer);
+};
+
+const computeScores = (questions, answersByQuestionId) => {
+  let totalReg = 0;
+  let earnedReg = 0;
+  let totalMat = 0;
+  let earnedMat = 0;
+
+  for (const question of questions) {
+    const regPoints = Number(question?.reg_points || 0);
+    const matPoints = Number(question?.mat_points || 0);
+
+    if (regPoints > 0) {
+      totalReg += regPoints;
+    }
+    if (matPoints > 0) {
+      totalMat += matPoints;
+    }
+
+    const answer = answersByQuestionId.get(question.question_id || question.id);
+    if (!answer) {
+      continue;
+    }
+
+    const normalizedAnswer = extractAnswerValue(answer);
+    if (isAnswerYes(normalizedAnswer)) {
+      if (regPoints > 0) {
+        earnedReg += regPoints;
+      }
+      if (matPoints > 0) {
+        earnedMat += matPoints;
+      }
+    }
+  }
+
+  const complianceScore = totalReg > 0 ? Math.round((earnedReg / totalReg) * 100) : 0;
+  const maturityScore = totalMat > 0 ? Math.round((earnedMat / totalMat) * 100) : 0;
+
+  return { complianceScore, maturityScore };
+};
+
+const collectQuestions = (schemaJson) => {
+  if (!schemaJson || typeof schemaJson !== 'object') {
+    return [];
+  }
+
+  if (Array.isArray(schemaJson.questions)) {
+    return schemaJson.questions;
+  }
+
+  return [];
+};
+
+const resolveCapaPayload = (question, responseValue) => {
+  const title =
+    question?.capa_title ||
+    question?.label ||
+    question?.question_text ||
+    'Non-conformity detected';
+
+  const severity = normalizeSeverity(question?.capa_severity || 'Major');
+
+  const dueDate = null;
+
+  const description = question?.label || question?.question_text || null;
+
+  return { title, severity, dueDate, description, responseValue };
+};
+
+const applyScoringAndCapas = async (client, tenantId, auditIds) => {
+  for (const auditId of auditIds) {
+    const auditResult = await client.query(
+      `SELECT a.id, a.template_id, a.tenant_id, t.schema_json
+       FROM audits a
+       LEFT JOIN templates t ON t.id = a.template_id
+       WHERE a.id = $1 AND a.tenant_id = $2
+       LIMIT 1`,
+      [auditId, tenantId]
+    );
+
+    if (auditResult.rows.length === 0) {
+      continue;
+    }
+
+    const auditRow = auditResult.rows[0];
+    if (!auditRow.template_id || !auditRow.schema_json) {
+      continue;
+    }
+
+    const answersResult = await client.query(
+      `SELECT question_id, response_value
+       FROM answers
+       WHERE audit_id = $1`,
+      [auditId]
+    );
+
+    const answersByQuestionId = new Map();
+    for (const row of answersResult.rows) {
+      answersByQuestionId.set(row.question_id, row.response_value);
+    }
+
+    const questions = collectQuestions(auditRow.schema_json);
+    const { complianceScore, maturityScore } = computeScores(questions, answersByQuestionId);
+
+    await client.query(
+      `UPDATE audits
+       SET compliance_score = $2,
+           maturity_level = $3
+       WHERE id = $1`,
+      [auditId, complianceScore, maturityScore]
+    );
+
+    for (const question of questions) {
+      const responseValue = answersByQuestionId.get(question.question_id || question.id);
+      if (!responseValue) {
+        continue;
+      }
+
+      if (!shouldTriggerCapa(question, responseValue)) {
+        continue;
+      }
+
+      const { title, severity, dueDate, description } = resolveCapaPayload(question, responseValue);
+      const existingCapa = await client.query(
+        `SELECT id FROM capa
+         WHERE audit_id = $1 AND tenant_id = $2 AND title = $3
+         LIMIT 1`,
+        [auditId, tenantId, title]
+      );
+
+      if (existingCapa.rows.length > 0) {
+        continue;
+      }
+
+      await client.query(
+        `INSERT INTO capa (audit_id, title, severity, status, due_date, tenant_id, non_conformity_desc)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [auditId, title, severity, 'todo', dueDate, tenantId, description]
+      );
+    }
+  }
+};
+
 const syncData = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { audits = [], answers = [], capas = [] } = req.body || {};
@@ -63,6 +274,7 @@ const syncData = async (req, res) => {
   const syncedAudits = new Set();
   const syncedAnswers = new Set();
   const syncedCapas = new Set();
+  const auditsToScore = new Set();
 
   try {
     await client.query('BEGIN');
@@ -89,17 +301,19 @@ const syncData = async (req, res) => {
              tenant_id,
              inspector_id,
              facility_id,
+               template_id,
              status,
              scheduled_date,
              created_at,
              updated_at
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
           [
             audit.id,
             tenantId,
             audit.inspector_id,
             audit.facility_id,
+              audit.template_id || null,
             audit.status || 'PLANIFIE',
             audit.scheduled_date || null,
             audit.created_at || audit.updated_at,
@@ -126,15 +340,17 @@ const syncData = async (req, res) => {
          SET tenant_id = $2,
              inspector_id = $3,
              facility_id = $4,
-             status = $5,
-             scheduled_date = $6,
-             updated_at = $7
+             template_id = COALESCE($5, template_id),
+             status = $6,
+             scheduled_date = $7,
+             updated_at = $8
          WHERE id = $1 AND tenant_id = $2`,
         [
           audit.id,
           tenantId,
           audit.inspector_id,
           audit.facility_id,
+          audit.template_id || null,
           audit.status || 'PLANIFIE',
           audit.scheduled_date || null,
           audit.updated_at
@@ -187,6 +403,7 @@ const syncData = async (req, res) => {
         );
 
         syncedAnswers.add(answer.id);
+        auditsToScore.add(answer.audit_id);
         continue;
       }
 
@@ -214,6 +431,7 @@ const syncData = async (req, res) => {
       );
 
       syncedAnswers.add(answer.id);
+      auditsToScore.add(answer.audit_id);
     }
 
     for (const capa of capas) {
@@ -294,6 +512,10 @@ const syncData = async (req, res) => {
       );
 
       syncedCapas.add(capa.id);
+    }
+
+    if (auditsToScore.size > 0) {
+      await applyScoringAndCapas(client, tenantId, auditsToScore);
     }
 
     await client.query('COMMIT');
