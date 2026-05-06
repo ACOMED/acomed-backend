@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE capa
+    ALTER COLUMN assigned_to DROP NOT NULL;
+
+COMMIT;

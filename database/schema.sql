@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS capa (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     audit_id UUID NOT NULL REFERENCES audits(id) ON DELETE CASCADE,
     non_conformity_desc TEXT NOT NULL,
-    assigned_to UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    assigned_to UUID REFERENCES users(id) ON DELETE RESTRICT,
     status VARCHAR(50) NOT NULL CHECK (
         status IN ('A_FAIRE', 'EN_COURS', 'EN_ATTENTE_VALIDATION', 'CLOTUREE', 'REJETEE')
     ),
