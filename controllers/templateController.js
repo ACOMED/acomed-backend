@@ -48,14 +48,36 @@ const generateTemplateCode = (name) => {
 
 const listTemplates = async (req, res) => {
   const tenantId = ensureTenantId(req);
+  const role = String(req.user?.role || '').toLowerCase();
+  const isInspector = role === 'inspector';
+  const inspectorId = req.user?.id;
 
-  const result = await db.query(
-    `SELECT id, name, code, schema_json, created_at
-     FROM templates
-     WHERE tenant_id = $1
-     ORDER BY updated_at DESC`,
-    [tenantId]
-  );
+  if (isInspector && !inspectorId) {
+    return sendResponse(res, 401, false, null, 'Unauthorized: inspector id is missing in token payload.');
+  }
+
+  let result = null;
+
+  if (isInspector) {
+    result = await db.query(
+      `SELECT DISTINCT t.id, t.name, t.code, t.schema_json, t.created_at
+       FROM templates t
+       LEFT JOIN audits a ON a.template_id = t.id AND a.tenant_id = t.tenant_id
+       LEFT JOIN facility_inspectors fi ON fi.facility_id = a.facility_id
+       WHERE t.tenant_id = $1
+         AND (a.inspector_id = $2 OR fi.inspector_id = $2)
+       ORDER BY t.updated_at DESC`,
+      [tenantId, inspectorId]
+    );
+  } else {
+    result = await db.query(
+      `SELECT id, name, code, schema_json, created_at
+       FROM templates
+       WHERE tenant_id = $1
+       ORDER BY updated_at DESC`,
+      [tenantId]
+    );
+  }
 
   const templates = result.rows.map(normalizeTemplate);
   return sendResponse(res, 200, true, templates, 'Templates fetched successfully.');
@@ -64,6 +86,13 @@ const listTemplates = async (req, res) => {
 const getTemplateById = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { id } = req.params;
+  const role = String(req.user?.role || '').toLowerCase();
+  const isInspector = role === 'inspector';
+  const inspectorId = req.user?.id;
+
+  if (isInspector && !inspectorId) {
+    return sendResponse(res, 401, false, null, 'Unauthorized: inspector id is missing in token payload.');
+  }
 
   const result = await db.query(
     `SELECT id, name, code, schema_json, created_at
@@ -75,6 +104,24 @@ const getTemplateById = async (req, res) => {
 
   if (result.rows.length === 0) {
     return sendResponse(res, 404, false, null, 'Template not found.');
+  }
+
+  if (isInspector) {
+    const accessResult = await db.query(
+      `SELECT 1
+       FROM templates t
+       LEFT JOIN audits a ON a.template_id = t.id AND a.tenant_id = t.tenant_id
+       LEFT JOIN facility_inspectors fi ON fi.facility_id = a.facility_id
+       WHERE t.id = $1
+         AND t.tenant_id = $2
+         AND (a.inspector_id = $3 OR fi.inspector_id = $3)
+       LIMIT 1`,
+      [id, tenantId, inspectorId]
+    );
+
+    if (accessResult.rows.length === 0) {
+      return sendResponse(res, 403, false, null, 'Access Denied: Template not assigned to your active scope.');
+    }
   }
 
   return sendResponse(res, 200, true, normalizeTemplate(result.rows[0]), 'Template fetched successfully.');
