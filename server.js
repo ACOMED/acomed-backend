@@ -10,6 +10,7 @@ const analyticsRoutes = require('./routes/analyticsRoutes');
 const knowledgeBaseRoutes = require('./routes/knowledgeBaseRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 const { sendResponse } = require('./utils/response');
 
 dotenv.config({ quiet: true });
@@ -48,6 +49,7 @@ app.use('/api/tenants', tenantRoutes);
 app.use('/api/audits', auditRoutes);
 app.use('/api/capas', capaRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/knowledge-base', knowledgeBaseRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/notifications', notificationRoutes);

@@ -195,7 +195,8 @@ const getAuditById = async (req, res) => {
     status: normalizeStatus(audit.status),
     compliance_score: audit.compliance_score,
     maturity_score: audit.maturity_level,
-    responses
+    responses,
+    answers: responses
   }, 'Audit fetched successfully.');
 };
 
