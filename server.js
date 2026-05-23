@@ -58,6 +58,10 @@ app.use('/api/search', searchRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/guides', guideRoutes);
 
+app.get('/api/health', (req, res) => {
+  return sendResponse(res, 200, true, { status: 'Good' }, 'Health check OK.');
+});
+
 app.get('/health', (req, res) => {
   return sendResponse(res, 200, true, { status: 'ok' }, 'Server is running.');
 });
