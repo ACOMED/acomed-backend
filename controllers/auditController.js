@@ -102,6 +102,21 @@ const parseResponseValue = (responseValue) => {
 
 const listAudits = async (req, res) => {
   const tenantId = ensureTenantId(req);
+  const role = String(req.user?.role || '').toLowerCase();
+  const isInspector = role === 'inspector';
+  const inspectorId = req.user?.id;
+
+  if (isInspector && !inspectorId) {
+    return sendResponse(res, 401, false, null, 'Unauthorized: inspector id is missing in token payload.');
+  }
+
+  const queryParams = [tenantId];
+  let inspectorClause = '';
+
+  if (isInspector) {
+    queryParams.push(inspectorId);
+    inspectorClause = ' AND a.inspector_id = $2';
+  }
 
   const result = await db.query(
     `SELECT a.id, a.ref, a.status, COALESCE(a.date, a.scheduled_date) AS date,
@@ -110,9 +125,9 @@ const listAudits = async (req, res) => {
      FROM audits a
      LEFT JOIN facilities f ON f.id = a.facility_id
      LEFT JOIN users u ON u.id = a.inspector_id
-     WHERE a.tenant_id = $1
+     WHERE a.tenant_id = $1${inspectorClause}
      ORDER BY a.updated_at DESC`,
-    [tenantId]
+    queryParams
   );
 
   const audits = result.rows.map((row) => ({
@@ -130,6 +145,21 @@ const listAudits = async (req, res) => {
 const getAuditById = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { id } = req.params;
+  const role = String(req.user?.role || '').toLowerCase();
+  const isInspector = role === 'inspector';
+  const inspectorId = req.user?.id;
+
+  if (isInspector && !inspectorId) {
+    return sendResponse(res, 401, false, null, 'Unauthorized: inspector id is missing in token payload.');
+  }
+
+  const queryParams = [id, tenantId];
+  let inspectorClause = '';
+
+  if (isInspector) {
+    queryParams.push(inspectorId);
+    inspectorClause = ' AND a.inspector_id = $3';
+  }
 
   const auditResult = await db.query(
     `SELECT a.id, a.ref, a.status, a.compliance_score, a.maturity_level, a.template_id,
@@ -138,12 +168,23 @@ const getAuditById = async (req, res) => {
      FROM audits a
      LEFT JOIN facilities f ON f.id = a.facility_id
      LEFT JOIN users u ON u.id = a.inspector_id
-     WHERE a.id = $1 AND a.tenant_id = $2
+     WHERE a.id = $1 AND a.tenant_id = $2${inspectorClause}
      LIMIT 1`,
-    [id, tenantId]
+    queryParams
   );
 
   if (auditResult.rows.length === 0) {
+    if (isInspector) {
+      const existsResult = await db.query(
+        `SELECT id FROM audits WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [id, tenantId]
+      );
+
+      if (existsResult.rows.length > 0) {
+        return sendResponse(res, 403, false, null, 'Forbidden: audit not assigned to inspector.');
+      }
+    }
+
     return sendResponse(res, 404, false, null, 'Audit not found.');
   }
 

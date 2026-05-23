@@ -33,6 +33,17 @@ const ensureAuditBelongsToTenant = async (client, auditId, tenantId) => {
   }
 };
 
+const ensureAuditBelongsToInspector = async (client, auditId, tenantId, inspectorId) => {
+  const auditResult = await client.query(
+    'SELECT id FROM audits WHERE id = $1 AND tenant_id = $2 AND inspector_id = $3 LIMIT 1',
+    [auditId, tenantId, inspectorId]
+  );
+
+  if (auditResult.rows.length === 0) {
+    throw createHttpError(403, 'Forbidden: audit not assigned to inspector.');
+  }
+};
+
 const shouldUpsert = (mobileUpdatedAt, serverUpdatedAt) => {
   if (mobileUpdatedAt === null) {
     return false;
@@ -258,6 +269,16 @@ const applyScoringAndCapas = async (client, tenantId, auditIds) => {
 
 const syncData = async (req, res) => {
   const tenantId = ensureTenantId(req);
+  const role = String(req.user?.role || '').toLowerCase();
+  const isInspector = role === 'inspector';
+  const inspectorId = req.user?.id;
+  const ensureAuditAccess = isInspector
+    ? (client, auditId) => ensureAuditBelongsToInspector(client, auditId, tenantId, inspectorId)
+    : (client, auditId) => ensureAuditBelongsToTenant(client, auditId, tenantId);
+
+  if (isInspector && !inspectorId) {
+    throw createHttpError(401, 'Unauthorized: inspector id is missing in token payload.');
+  }
   const { audits = [], answers = [], capas = [] } = req.body || {};
 
   if (!Array.isArray(audits) || !Array.isArray(answers) || !Array.isArray(capas)) {
@@ -290,11 +311,15 @@ const syncData = async (req, res) => {
       }
 
       const existingAuditResult = await client.query(
-        'SELECT tenant_id, updated_at FROM audits WHERE id = $1 LIMIT 1',
+        'SELECT tenant_id, updated_at, inspector_id FROM audits WHERE id = $1 LIMIT 1',
         [audit.id]
       );
 
       if (existingAuditResult.rows.length === 0) {
+        if (isInspector && audit.inspector_id && audit.inspector_id !== inspectorId) {
+          throw createHttpError(403, 'Forbidden: audit not assigned to inspector.');
+        }
+
         await client.query(
           `INSERT INTO audits (
              id,
@@ -311,7 +336,7 @@ const syncData = async (req, res) => {
           [
             audit.id,
             tenantId,
-            audit.inspector_id,
+            isInspector ? inspectorId : audit.inspector_id,
             audit.facility_id,
               audit.template_id || null,
             audit.status || 'PLANIFIE',
@@ -328,6 +353,10 @@ const syncData = async (req, res) => {
       const existingAudit = existingAuditResult.rows[0];
       if (existingAudit.tenant_id !== tenantId) {
         throw createHttpError(403, 'Forbidden: audit tenant mismatch.');
+      }
+
+      if (isInspector && existingAudit.inspector_id !== inspectorId) {
+        throw createHttpError(403, 'Forbidden: audit not assigned to inspector.');
       }
 
       const serverUpdatedAt = toEpoch(existingAudit.updated_at);
@@ -348,7 +377,7 @@ const syncData = async (req, res) => {
         [
           audit.id,
           tenantId,
-          audit.inspector_id,
+          isInspector ? inspectorId : audit.inspector_id,
           audit.facility_id,
           audit.template_id || null,
           audit.status || 'PLANIFIE',
@@ -380,7 +409,7 @@ const syncData = async (req, res) => {
       );
 
       if (existingAnswerResult.rows.length === 0) {
-        await ensureAuditBelongsToTenant(client, answer.audit_id, tenantId);
+        await ensureAuditAccess(client, answer.audit_id);
 
         await client.query(
           `INSERT INTO answers (
@@ -412,7 +441,7 @@ const syncData = async (req, res) => {
         continue;
       }
 
-      await ensureAuditBelongsToTenant(client, answer.audit_id, tenantId);
+      await ensureAuditAccess(client, answer.audit_id);
 
       await client.query(
         `UPDATE answers
@@ -454,7 +483,7 @@ const syncData = async (req, res) => {
       );
 
       if (existingCapaResult.rows.length === 0) {
-        await ensureAuditBelongsToTenant(client, capa.audit_id, tenantId);
+        await ensureAuditAccess(client, capa.audit_id);
 
         await client.query(
           `INSERT INTO capa (
@@ -489,7 +518,7 @@ const syncData = async (req, res) => {
         continue;
       }
 
-      await ensureAuditBelongsToTenant(client, capa.audit_id, tenantId);
+      await ensureAuditAccess(client, capa.audit_id);
 
       await client.query(
         `UPDATE capa
