@@ -7,6 +7,15 @@ CREATE TABLE IF NOT EXISTS tenants (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS guides (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    file_path TEXT NOT NULL,
+    original_name TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
@@ -85,6 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_answers_audit_id ON answers (audit_id);
 CREATE INDEX IF NOT EXISTS idx_capa_audit_id ON capa (audit_id);
 CREATE INDEX IF NOT EXISTS idx_capa_assigned_to ON capa (assigned_to);
 CREATE INDEX IF NOT EXISTS idx_capa_status ON capa (status);
+CREATE INDEX IF NOT EXISTS idx_guides_tenant_id ON guides (tenant_id);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$

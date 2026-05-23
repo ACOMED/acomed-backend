@@ -11,7 +11,9 @@ const knowledgeBaseRoutes = require('./routes/knowledgeBaseRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const guideRoutes = require('./routes/guideRoutes');
 const { sendResponse } = require('./utils/response');
+const path = require('path');
 
 dotenv.config({ quiet: true });
 
@@ -20,6 +22,7 @@ const port = Number(process.env.PORT || 5000);
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -53,6 +56,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/knowledge-base', knowledgeBaseRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/guides', guideRoutes);
 
 app.get('/health', (req, res) => {
   return sendResponse(res, 200, true, { status: 'ok' }, 'Server is running.');
