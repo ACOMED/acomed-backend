@@ -195,6 +195,47 @@ Returns template metadata, sections, and a `questions` array describing each UI 
 - UI composition must be based on `questions` and their `answer_type`.
 - Conditional visibility must be computed from `parent_question_id` + `prerequisite_condition`.
 
+## Notifications
+
+### POST /api/notifications/register-device
+
+Registers or updates the mobile device push token for the logged-in user.
+
+#### Request Headers
+
+- `Authorization: Bearer <JWT_TOKEN>`
+- `Content-Type: application/json`
+
+#### Request Body
+
+```json
+{
+  "fcm_token": "bk3RNwZs3Qg:CI2g_D84...",
+  "device_type": "android"
+}
+```
+
+#### Success Response (200)
+
+```json
+{
+  "success": true,
+  "message": "Device registered successfully.",
+  "data": {
+    "id": "3f9b3b75-3bc2-4cc9-8d6b-e0f041ec3a9b",
+    "user_id": "0f2a49aa-2f7c-4f0a-9e86-2bbde69369c4",
+    "fcm_token": "bk3RNwZs3Qg:CI2g_D84...",
+    "device_type": "android",
+    "updated_at": "2026-05-23T21:30:00.000Z"
+  }
+}
+```
+
+#### Error Responses
+
+- `400`: missing `fcm_token` or `device_type`, or invalid `device_type`
+- `401`: missing or invalid token
+
 ## Test Accounts (QA / Integration)
 
 Use these accounts for integration tests and dashboard/mobile validation.
