@@ -62,7 +62,35 @@ const markNotificationRead = async (req, res) => {
   return sendResponse(res, 200, true, { id }, 'Notification marked as read.');
 };
 
+const registerDevice = async (req, res) => {
+  const { userId } = ensureUser(req);
+  const { fcm_token, device_type } = req.body || {};
+
+  if (!fcm_token || !device_type) {
+    return sendResponse(res, 400, false, null, 'fcm_token and device_type are required.');
+  }
+
+  const normalizedType = String(device_type).toLowerCase();
+  if (!['android', 'ios'].includes(normalizedType)) {
+    return sendResponse(res, 400, false, null, 'device_type must be android or ios.');
+  }
+
+  const result = await db.query(
+    `INSERT INTO user_devices (user_id, fcm_token, device_type, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (fcm_token)
+     DO UPDATE SET user_id = EXCLUDED.user_id,
+                   device_type = EXCLUDED.device_type,
+                   updated_at = NOW()
+     RETURNING id, user_id, fcm_token, device_type, updated_at`,
+    [userId, fcm_token, normalizedType]
+  );
+
+  return sendResponse(res, 200, true, result.rows[0], 'Device registered successfully.');
+};
+
 module.exports = {
   listNotifications,
-  markNotificationRead
+  markNotificationRead,
+  registerDevice
 };

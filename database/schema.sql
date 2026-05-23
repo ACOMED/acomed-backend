@@ -27,6 +27,14 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS user_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    fcm_token TEXT NOT NULL UNIQUE,
+    device_type VARCHAR(20) NOT NULL CHECK (device_type IN ('android', 'ios')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS facilities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
@@ -85,6 +93,7 @@ CREATE TABLE IF NOT EXISTS capa (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices (user_id);
 CREATE INDEX IF NOT EXISTS idx_facilities_tenant_id ON facilities (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_questions_parent_question_id ON questions (parent_question_id);
 CREATE INDEX IF NOT EXISTS idx_audits_tenant_id ON audits (tenant_id);

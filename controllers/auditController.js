@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { sendResponse } = require('../utils/response');
+const { getFirebaseAdmin } = require('../utils/firebaseAdmin');
 
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
@@ -261,6 +262,48 @@ const createAudit = async (req, res) => {
      RETURNING id, ref, status`,
     [tenantId, template_id, inspector_id, facility_id, date, 'brouillon', ref]
   );
+
+  const facilityResult = await db.query(
+    `SELECT name FROM facilities WHERE id = $1 AND tenant_id = $2`,
+    [facility_id, tenantId]
+  );
+
+  const facilityName = facilityResult.rows[0]?.name || 'the facility';
+  const notificationMessage = `New audit assigned at ${facilityName}.`;
+
+  await db.query(
+    `INSERT INTO notifications (tenant_id, user_id, message)
+     VALUES ($1, $2, $3)`,
+    [tenantId, inspector_id, notificationMessage]
+  );
+
+  try {
+    const deviceResult = await db.query(
+      `SELECT fcm_token
+       FROM user_devices
+       WHERE user_id = $1
+       ORDER BY updated_at DESC`,
+      [inspector_id]
+    );
+
+    const tokens = deviceResult.rows.map((row) => row.fcm_token).filter(Boolean);
+    if (tokens.length > 0) {
+      const admin = getFirebaseAdmin();
+      await admin.messaging().sendMulticast({
+        tokens,
+        notification: {
+          title: 'New Audit Assigned',
+          body: `You have been assigned to a new audit at ${facilityName}.`
+        },
+        data: {
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+          audit_id: result.rows[0].id
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Failed to send audit assignment push notification.', error);
+  }
 
   return sendResponse(res, 201, true, {
     id: result.rows[0].id,
