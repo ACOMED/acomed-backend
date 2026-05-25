@@ -232,6 +232,7 @@ const getAuditById = async (req, res) => {
   return sendResponse(res, 200, true, {
     id: audit.id,
     code: audit.ref,
+    template_id: audit.template_id,
     facility_name: audit.facility_name,
     inspector_name: audit.inspector_name,
     status: normalizeStatus(audit.status),
