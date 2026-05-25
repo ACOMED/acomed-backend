@@ -23,7 +23,11 @@ const listFacilities = async (req, res) => {
 
   const result = await db.query(
     `SELECT f.id, f.name, f.type, f.region AS location,
-            COUNT(fi.inspector_id)::int AS inspector_count
+            COUNT(fi.inspector_id)::int AS inspector_count,
+            COALESCE(
+              ARRAY_AGG(DISTINCT fi.inspector_id) FILTER (WHERE fi.inspector_id IS NOT NULL),
+              '{}'::uuid[]
+            ) AS inspector_ids
      FROM facilities f
      LEFT JOIN facility_inspectors fi ON fi.facility_id = f.id
      WHERE f.tenant_id = $1
