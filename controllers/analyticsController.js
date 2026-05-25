@@ -17,6 +17,41 @@ const ensureTenantId = (req) => {
   return tenantId;
 };
 
+const extractAnswerValue = (responseValue) => {
+  if (responseValue === null || responseValue === undefined) {
+    return null;
+  }
+
+  if (typeof responseValue === 'object') {
+    if (Object.prototype.hasOwnProperty.call(responseValue, 'answer_value')) {
+      return responseValue.answer_value;
+    }
+  }
+
+  return responseValue;
+};
+
+const normalizeAnswerText = (value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  return value.trim().toLowerCase();
+};
+
+const isAnswerYes = (value) => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = normalizeAnswerText(value);
+  return normalized === 'yes' || normalized === 'true' || normalized === 'pass';
+};
+
+const resolveCategory = (question) => {
+  return question?.category || question?.topic || question?.group || null;
+};
+
 const getAnalyticsOverview = async (req, res) => {
   const tenantId = ensureTenantId(req);
 
@@ -84,6 +119,84 @@ const getAnalyticsOverview = async (req, res) => {
   const complianceScore = Number(auditTotal.avg_compliance || 0);
   const maturityScore = Number(auditTotal.avg_maturity || 0);
 
+  const templateRows = await db.query(
+    `SELECT id, schema_json
+     FROM templates
+     WHERE tenant_id = $1`,
+    [tenantId]
+  );
+
+  const templateMap = new Map(templateRows.rows.map((row) => [row.id, row.schema_json]));
+
+  const auditRows = await db.query(
+    `SELECT id, template_id
+     FROM audits
+     WHERE tenant_id = $1
+       AND template_id IS NOT NULL`,
+    [tenantId]
+  );
+
+  const auditTemplateMap = new Map(auditRows.rows.map((row) => [row.id, row.template_id]));
+  const auditIds = auditRows.rows.map((row) => row.id);
+
+  let categoryScores = new Map();
+  if (auditIds.length > 0) {
+    const answerRows = await db.query(
+      `SELECT audit_id, question_id, response_value
+       FROM answers
+       WHERE audit_id = ANY($1::uuid[])`,
+      [auditIds]
+    );
+
+    const questionMetaCache = new Map();
+    for (const row of answerRows.rows) {
+      const templateId = auditTemplateMap.get(row.audit_id);
+      if (!templateId) {
+        continue;
+      }
+
+      if (!questionMetaCache.has(templateId)) {
+        const schema = templateMap.get(templateId);
+        const questionMeta = new Map();
+
+        if (schema && Array.isArray(schema.questions)) {
+          for (const question of schema.questions) {
+            const questionId = question?.question_id || question?.id || null;
+            const category = resolveCategory(question);
+            if (!questionId || !category) {
+              continue;
+            }
+
+            questionMeta.set(questionId, {
+              category,
+              matPoints: Number(question?.mat_points || 0)
+            });
+          }
+        }
+
+        questionMetaCache.set(templateId, questionMeta);
+      }
+
+      const questionMeta = questionMetaCache.get(templateId);
+      const meta = questionMeta?.get(row.question_id);
+      if (!meta || meta.matPoints <= 0) {
+        continue;
+      }
+
+      if (!categoryScores.has(meta.category)) {
+        categoryScores.set(meta.category, { total: 0, earned: 0 });
+      }
+
+      const score = categoryScores.get(meta.category);
+      score.total += meta.matPoints;
+
+      const normalizedAnswer = extractAnswerValue(row.response_value);
+      if (isAnswerYes(normalizedAnswer)) {
+        score.earned += meta.matPoints;
+      }
+    }
+  }
+
   const trendData = trendRows.rows.map((row) => ({
     name: row.month,
     compliance: Number(row.compliance || 0),
@@ -109,6 +222,21 @@ const getAnalyticsOverview = async (req, res) => {
       );
   };
 
+  const hasCategoryScores = Array.from(categoryScores.values()).some((score) => score.total > 0);
+  const radarData = hasCategoryScores
+    ? Array.from(categoryScores.entries()).map(([category, score]) => ({
+      subject: category,
+      A: score.total > 0 ? Math.round((score.earned / score.total) * 100) : 0,
+      fullMark: 100
+    }))
+    : [
+      { subject: 'Safety', A: complianceScore, fullMark: 100 },
+      { subject: 'Hygiene', A: maturityScore, fullMark: 100 },
+      { subject: 'Documentation', A: maturityScore, fullMark: 100 },
+      { subject: 'Training', A: maturityScore, fullMark: 100 },
+      { subject: 'Process', A: complianceScore, fullMark: 100 }
+    ];
+
   const response = {
     complianceScore,
     maturityScore,
@@ -116,13 +244,7 @@ const getAnalyticsOverview = async (req, res) => {
     openCapas: Number(openCapas.rows[0]?.total || 0),
     facilitiesInspected: Number(facilitiesInspected.rows[0]?.total || 0),
     totalFacilities: Number(totalFacilities.rows[0]?.total || 0),
-    radarData: [
-      { subject: 'Safety', A: complianceScore, fullMark: 100 },
-      { subject: 'Hygiene', A: maturityScore, fullMark: 100 },
-      { subject: 'Documentation', A: maturityScore, fullMark: 100 },
-      { subject: 'Training', A: maturityScore, fullMark: 100 },
-      { subject: 'Process', A: complianceScore, fullMark: 100 }
-    ],
+    radarData,
     capaCounts: {
       open: normalizeCounts(['todo', 'inProgress', 'review']),
       closed: normalizeCounts(['closed'])
