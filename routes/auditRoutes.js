@@ -6,7 +6,8 @@ const {
   getAuditById,
   createAudit,
   updateAudit,
-  updateAuditStatus
+  updateAuditStatus,
+  deleteAudit
 } = require('../controllers/auditController');
 
 const router = express.Router();
@@ -16,5 +17,6 @@ router.get('/:id', authMiddleware, asyncHandler(getAuditById));
 router.post('/', authMiddleware, asyncHandler(createAudit));
 router.put('/:id', authMiddleware, asyncHandler(updateAudit));
 router.patch('/:id/status', authMiddleware, asyncHandler(updateAuditStatus));
+router.delete('/:id', authMiddleware, asyncHandler(deleteAudit));
 
 module.exports = router;

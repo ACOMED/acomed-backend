@@ -416,10 +416,55 @@ const updateAuditStatus = async (req, res) => {
   }, 'Audit status updated successfully.');
 };
 
+const deleteAudit = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+  const { id } = req.params;
+  const role = String(req.user?.role || '').toLowerCase();
+  const isInspector = role === 'inspector';
+  const inspectorId = req.user?.id;
+
+  if (isInspector && !inspectorId) {
+    return sendResponse(res, 401, false, null, 'Unauthorized: inspector id is missing in token payload.');
+  }
+
+  const queryParams = [id, tenantId];
+  let inspectorClause = '';
+
+  if (isInspector) {
+    queryParams.push(inspectorId);
+    inspectorClause = ' AND inspector_id = $3';
+  }
+
+  const result = await db.query(
+    `DELETE FROM audits
+     WHERE id = $1 AND tenant_id = $2${inspectorClause}
+     RETURNING id`,
+    queryParams
+  );
+
+  if (result.rows.length === 0) {
+    if (isInspector) {
+      const existsResult = await db.query(
+        `SELECT id FROM audits WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [id, tenantId]
+      );
+
+      if (existsResult.rows.length > 0) {
+        return sendResponse(res, 403, false, null, 'Forbidden: audit not assigned to inspector.');
+      }
+    }
+
+    return sendResponse(res, 404, false, null, 'Audit not found.');
+  }
+
+  return sendResponse(res, 200, true, null, 'Audit deleted successfully.');
+};
+
 module.exports = {
   listAudits,
   getAuditById,
   createAudit,
   updateAudit,
-  updateAuditStatus
+  updateAuditStatus,
+  deleteAudit
 };

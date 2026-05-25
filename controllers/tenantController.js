@@ -75,6 +75,48 @@ const updateFacility = async (req, res) => {
   return sendResponse(res, 200, true, result.rows[0], 'Facility updated successfully.');
 };
 
+const deleteFacility = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+  const { id } = req.params;
+  const client = await db.pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `DELETE FROM audits
+       WHERE tenant_id = $1 AND facility_id = $2`,
+      [tenantId, id]
+    );
+
+    await client.query(
+      `DELETE FROM facility_inspectors
+       WHERE facility_id = $1`,
+      [id]
+    );
+
+    const result = await client.query(
+      `DELETE FROM facilities
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id`,
+      [id, tenantId]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return sendResponse(res, 404, false, null, 'Facility not found.');
+    }
+
+    await client.query('COMMIT');
+    return sendResponse(res, 200, true, null, 'Facility deleted successfully.');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 const listUsers = async (req, res) => {
   const tenantId = ensureTenantId(req);
 
@@ -184,6 +226,61 @@ const updateUserRole = async (req, res) => {
   }, 'User role updated successfully.');
 };
 
+const deleteUser = async (req, res) => {
+  const tenantId = ensureTenantId(req);
+  const { id } = req.params;
+  const client = await db.pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `UPDATE capa
+       SET assigned_to = NULL
+       WHERE assigned_to = $1`,
+      [id]
+    );
+
+    await client.query(
+      `DELETE FROM facility_inspectors
+       WHERE inspector_id = $1`,
+      [id]
+    );
+
+    await client.query(
+      `DELETE FROM audits
+       WHERE tenant_id = $1 AND inspector_id = $2`,
+      [tenantId, id]
+    );
+
+    await client.query(
+      `DELETE FROM user_devices
+       WHERE user_id = $1`,
+      [id]
+    );
+
+    const result = await client.query(
+      `DELETE FROM users
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id`,
+      [id, tenantId]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return sendResponse(res, 404, false, null, 'User not found.');
+    }
+
+    await client.query('COMMIT');
+    return sendResponse(res, 200, true, null, 'User deleted successfully.');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 const listFacilityInspectors = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { id } = req.params;
@@ -279,10 +376,12 @@ module.exports = {
   listFacilities,
   createFacility,
   updateFacility,
+  deleteFacility,
   listUsers,
   createUser,
   updateUser,
   updateUserRole,
+  deleteUser,
   listFacilityInspectors,
   assignInspectorToFacility,
   removeInspectorFromFacility

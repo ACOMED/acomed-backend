@@ -5,10 +5,12 @@ const {
   listFacilities,
   createFacility,
   updateFacility,
+  deleteFacility,
   listUsers,
   createUser,
   updateUser,
   updateUserRole,
+  deleteUser,
   listFacilityInspectors,
   assignInspectorToFacility,
   removeInspectorFromFacility
@@ -19,11 +21,13 @@ const router = express.Router();
 router.get('/facilities', authMiddleware, asyncHandler(listFacilities));
 router.post('/facilities', authMiddleware, asyncHandler(createFacility));
 router.put('/facilities/:id', authMiddleware, asyncHandler(updateFacility));
+router.delete('/facilities/:id', authMiddleware, asyncHandler(deleteFacility));
 
 router.get('/users', authMiddleware, asyncHandler(listUsers));
 router.post('/users', authMiddleware, asyncHandler(createUser));
 router.put('/users/:id', authMiddleware, asyncHandler(updateUser));
 router.patch('/users/:id/role', authMiddleware, asyncHandler(updateUserRole));
+router.delete('/users/:id', authMiddleware, asyncHandler(deleteUser));
 
 router.get('/facilities/:id/inspectors', authMiddleware, asyncHandler(listFacilityInspectors));
 router.post('/facilities/:id/inspectors', authMiddleware, asyncHandler(assignInspectorToFacility));
