@@ -4,6 +4,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
 const {
   listNotifications,
   markNotificationRead,
+  markAllNotificationsRead,
   registerDevice
 } = require('../controllers/notificationController');
 
@@ -11,6 +12,7 @@ const router = express.Router();
 
 router.get('/', authMiddleware, asyncHandler(listNotifications));
 router.post('/register-device', authMiddleware, asyncHandler(registerDevice));
+router.patch('/read-all', authMiddleware, asyncHandler(markAllNotificationsRead));
 router.patch('/:id/read', authMiddleware, asyncHandler(markNotificationRead));
 
 module.exports = router;

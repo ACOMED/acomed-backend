@@ -62,6 +62,21 @@ const markNotificationRead = async (req, res) => {
   return sendResponse(res, 200, true, { id }, 'Notification marked as read.');
 };
 
+const markAllNotificationsRead = async (req, res) => {
+  const { userId, tenantId } = ensureUser(req);
+
+  await db.query(
+    `UPDATE notifications
+     SET is_read = TRUE
+     WHERE user_id = $1
+       AND tenant_id = $2
+       AND is_read = FALSE`,
+    [userId, tenantId]
+  );
+
+  return sendResponse(res, 200, true, null, 'Notifications marked as read.');
+};
+
 const registerDevice = async (req, res) => {
   const { userId } = ensureUser(req);
   const { fcm_token, device_type } = req.body || {};
@@ -92,5 +107,6 @@ const registerDevice = async (req, res) => {
 module.exports = {
   listNotifications,
   markNotificationRead,
+  markAllNotificationsRead,
   registerDevice
 };
