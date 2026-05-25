@@ -101,6 +101,43 @@ const parseResponseValue = (responseValue) => {
   return { answer_value: String(responseValue), evidence_url: null };
 };
 
+const buildQuestionMap = (schema) => {
+  const map = new Map();
+
+  if (schema && Array.isArray(schema.questions)) {
+    for (const question of schema.questions) {
+      const questionId =
+        question?.question_id ||
+        question?.id ||
+        question?.node_id ||
+        question?.nodeId ||
+        null;
+      const questionText =
+        question?.label ||
+        question?.question_text ||
+        question?.text ||
+        null;
+
+      if (questionId && questionText) {
+        map.set(questionId, questionText);
+      }
+    }
+  }
+
+  if (schema?.visual && Array.isArray(schema.visual.nodes)) {
+    for (const node of schema.visual.nodes) {
+      const nodeId = node?.id || node?.node_id || node?.nodeId || null;
+      const nodeText = node?.label || node?.text || node?.title || null;
+
+      if (nodeId && nodeText && !map.has(nodeId)) {
+        map.set(nodeId, nodeText);
+      }
+    }
+  }
+
+  return map;
+};
+
 const listAudits = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const role = String(req.user?.role || '').toLowerCase();
@@ -208,13 +245,7 @@ const getAuditById = async (req, res) => {
     );
 
     const schema = templateResult.rows[0]?.schema_json;
-    if (schema && Array.isArray(schema.questions)) {
-      questionMap = new Map(
-        schema.questions
-          .filter((question) => question && question.question_id)
-          .map((question) => [question.question_id, question.label || question.question_text || null])
-      );
-    }
+    questionMap = buildQuestionMap(schema);
   }
 
   const responses = responsesResult.rows.map((row) => {
