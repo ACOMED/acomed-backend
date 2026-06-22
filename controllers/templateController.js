@@ -173,12 +173,46 @@ const deleteTemplate = async (req, res) => {
   const tenantId = ensureTenantId(req);
   const { id } = req.params;
 
-  const result = await db.query(
-    `DELETE FROM templates
-     WHERE id = $1 AND tenant_id = $2
-     RETURNING id`,
-    [id, tenantId]
+  const activeAuditResult = await db.query(
+    `SELECT COUNT(*)::int AS total
+     FROM audits
+     WHERE tenant_id = $1
+       AND template_id = $2
+       AND LOWER(COALESCE(status, '')) NOT IN ('cloture', 'closed', 'archive', 'archived')`,
+    [tenantId, id]
   );
+
+  if (Number(activeAuditResult.rows[0]?.total || 0) > 0) {
+    return sendResponse(
+      res,
+      409,
+      false,
+      null,
+      'Template is linked to active audits and cannot be deleted.'
+    );
+  }
+
+  let result = null;
+  try {
+    result = await db.query(
+      `DELETE FROM templates
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id`,
+      [id, tenantId]
+    );
+  } catch (error) {
+    if (error.code === '23503') {
+      return sendResponse(
+        res,
+        409,
+        false,
+        null,
+        'Template is still referenced by existing records and cannot be deleted.'
+      );
+    }
+
+    throw error;
+  }
 
   if (result.rows.length === 0) {
     return sendResponse(res, 404, false, null, 'Template not found.');
